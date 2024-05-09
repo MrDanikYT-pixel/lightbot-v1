@@ -26,7 +26,7 @@ async def r_mode(db: aiosqlite.Connection) -> bool | None:
     return True if r_mode == 'True' else (False if r_mode == 'False' else None)
 
 
-@lightbulb.command("info", bot_plugin)
+@functions.command("info", bot_plugin)
 @lightbulb.implements(lightbulb.SlashCommandGroup)
 async def info(ctx: lightbulb.Context):
     ...

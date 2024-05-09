@@ -360,7 +360,7 @@ async def clear_db(ctx: lightbulb.Context, member: hikari.Member) -> None:
 
 
 @administrator_command
-@lightbulb.command("allowed_channels", bot_plugin)
+@functions.command("allowed_channels", bot_plugin)
 @lightbulb.implements(lightbulb.SlashCommandGroup)
 async def allowed_channels(ctx: lightbulb.Context) -> None:
     pass
