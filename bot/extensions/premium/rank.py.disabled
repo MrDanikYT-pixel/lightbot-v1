@@ -1,0 +1,175 @@
+# by mrdan__(476046299691745300)
+# oficial server: https://discord.gg/2e5SMn73Hw
+import hikari
+import lightbulb
+import aiosqlite as sqlite3
+import info as botinfo
+from info import error_color
+from info import global_color
+from functions import async_createdb
+import functions
+
+
+bot_plugin = lightbulb.Plugin(
+    "Сисема ранга",
+    f"Сделал {botinfo.developer}"
+)
+
+aiosqlite = sqlite3
+CHOICES = botinfo.CHOICES
+token_regex = botinfo.regex["token"]
+
+notvip = hikari.Embed(title="Ошибка!", description="Ваш сервер не имеет уровень премиума `{}`", color=error_color)
+glvl = 3
+
+
+def administrator_command(func):
+    func = lightbulb.app_command_permissions(hikari.Permissions.ADMINISTRATOR)(func)
+    return func
+
+
+def administrator_sub_command(func):
+    func = lightbulb.add_checks(lightbulb.has_guild_permissions(hikari.Permissions.ADMINISTRATOR))(func)
+    return func
+
+
+def nvrespond(ctx: lightbulb.Context, lvl: int):
+    notvip.description = notvip.description.format(str(lvl))
+    return ctx.respond(notvip)
+
+
+only_guild_command = functions.OnlyGuildCommand(bot_plugin).only_guild_command
+
+# @only_guild_command()
+# @administrator_command
+# @functions.command("example")
+# @lightbulb.implements(lightbulb.SlashCommand)
+# async def example(ctx: lightbulb.Context):
+#     vl = (await functions.server_info(ctx))["level"]
+#     if vl > glvl or vl == 0:
+#         await nvrespond(ctx, glvl)
+#         return
+#     async with sqlite3.connect(f'../db/{ctx.guild_id}database.sqlite') as db:
+#         sql = await db.cursor()
+#         await async_createdb(ctx.guild_id, sql, db)
+
+
+@only_guild_command()
+@functions.command("rank")
+@lightbulb.implements(lightbulb.SlashCommand)
+async def rank(ctx: lightbulb.Context, member: hikari.Member):
+    vl = (await functions.server_info(ctx))["level"]
+    if vl > glvl or vl == 0:
+        await nvrespond(ctx, glvl)
+        return
+    if member is None:
+        member = ctx.member
+    async with sqlite3.connect(f'../db/{ctx.guild_id}database.sqlite') as db:
+        sql = await db.cursor()
+        await async_createdb(ctx.guild_id, sql, db)
+        xp = await functions.get_xp(member.id, db)
+        level = await functions.get_level_xp(xp)
+        lvlcalc = functions.LevelCalculation()
+        next_lvl_xp = await lvlcalc.xp_to_next(level)
+        xp_all = await lvlcalc.xp_all(level)
+        await sql.execute(
+            """
+            SELECT xp, member_id FROM rank ORDER BY xp DESC LIMIT 100
+            """
+        )
+        rep = functions.Reputation()
+        result = await rep.get(db, sql, member)
+        leaderboard_xp = await sql.fetchall()
+        index = 0
+        rank = 0
+        _member = member
+        for x in leaderboard_xp:
+            member_id = x[1]
+            member = ctx.get_guild().get_member(member_id)
+            if member is not None:
+                if not member.is_bot and not member.is_system:
+                    index += 1
+                    if member.id == _member.id:
+                        rank = index
+                        break
+        file = await functions.generate_card(member, level, xp, next_lvl_xp, xp_all, rank, result, resolution_multiplier=1)
+
+        await ctx.respond(file)
+
+
+@only_guild_command()
+@functions.command("leaderboard")
+@lightbulb.implements(lightbulb.SlashCommand)
+async def leaders(ctx: lightbulb.Context, page: int):
+    vl = (await functions.server_info(ctx))["level"]
+    if vl > glvl or vl == 0:
+        await nvrespond(ctx, glvl)
+        return
+    view = None
+    async with sqlite3.connect(f'../db/{ctx.guild_id}database.sqlite') as db:
+        sql = await db.cursor()
+        await async_createdb(ctx.guild_id, sql, db)
+        enabled = (await functions.Setting(db, "rank").get("False"))[0]
+        if enabled != 'False':
+            await sql.execute(
+                """
+                SELECT xp, member_id FROM rank ORDER BY xp DESC
+                """
+            )
+            leaderboard_xp = await sql.fetchall()
+            index = 0
+            elements = []
+            for x in leaderboard_xp:
+                xp = x[0]
+                level = await functions.get_level_xp(xp)
+                member_id = x[1]
+                member = ctx.get_guild().get_member(member_id)
+                if member is not None:
+                    if not member.is_bot and not member.is_system:
+                        index += 1
+                        member_name = member.username
+                        elements.append(f"**{member_name}** \nУровень {level} | Опыт: {xp}")
+            embed = hikari.Embed(
+                title="Топ участников по опыту",
+                description="",
+                color=global_color
+            )
+            view = functions.Views.Pages(elements, ctx, embed, 10, page, ctx.author.id, "")
+            embed.set_thumbnail(ctx.get_guild().icon_url)
+        else:
+            embed = hikari.Embed(title="Ошибка!",
+                                 description="Включите систему рейтинга",
+                                 color=error_color)
+            await ctx.respond(embed)
+    if view is not None:
+        msg = await view.generate_list()
+        await view.start(msg)
+
+
+@only_guild_command()
+@functions.command("rank_settings")
+@lightbulb.implements(lightbulb.SlashCommand)
+async def activate_rank_system(ctx: lightbulb.Context):
+    vl = (await functions.server_info(ctx))["level"]
+    if vl > glvl or vl == 0:
+        await nvrespond(ctx, glvl)
+        return
+    view = None
+    async with sqlite3.connect(f'../db/{ctx.guild_id}database.sqlite') as db:
+        sql = await db.cursor()
+        await async_createdb(ctx.guild_id, sql, db)
+        enabled = (await functions.Setting(db, "rank").get("False"))[0]
+        if enabled != 'False':
+            view = functions.Views.RankSetting(ctx)
+            msg = await ctx.respond("test", components=view)
+            await view.start(msg)
+        else:
+            ...
+
+
+def load(bot: lightbulb.BotApp) -> None:
+    bot.add_plugin(bot_plugin)
+
+
+def unload(bot: lightbulb.BotApp) -> None:
+    bot.remove_plugin(bot_plugin)
